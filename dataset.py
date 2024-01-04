@@ -42,7 +42,9 @@ class Dataset(data.Dataset):
         # 'input_ans': torch.FloatTensor(input_ans)
         return output
 
-
+'''
+    把batch中的数据整理出，input_labels, input_mask, output_labels, output_mask 然后合成字典形式输出。
+'''
 class collate_fn(object):
     def __init__(self, n_question):
         self.n_question = n_question

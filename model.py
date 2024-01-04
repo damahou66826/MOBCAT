@@ -16,7 +16,9 @@ def pick_random_sample(input_mask,n_query,n_question):
     if n_query==-1:
         return input_mask.detach().clone()
     train_mask = torch.zeros(input_mask.shape[0], n_question).long().to(device)
+    # 使用 torch.multinomial(input_mask.float(), n_query, replacement=False) 对 input_mask 进行多项式分布采样。这会在每一行中选择 n_query 个非零元素的索引（即问题的索引），replacement=False 表示采样过程中不放回。
     actions = torch.multinomial(input_mask.float(), n_query, replacement=False)
+    # 将采样得到的问题索引在 train_mask 中对应的位置上设置为 1，表示这些问题是用于训练的。
     train_mask = train_mask.scatter(dim=1, index=actions, value=1)
     return train_mask
 
@@ -55,8 +57,10 @@ class MAMLModel(nn.Module):
         self.sigmoid = nn.Sigmoid()
         self.n_question = n_question
         self.question_dim = question_dim
+        # biirt
         if self.question_dim == 1:
-            self.question_difficulty = nn.Parameter(torch.zeros(question_dim,n_question))        
+            self.question_difficulty = nn.Parameter(torch.zeros(question_dim,n_question))
+        # binn
         if self.question_dim>1:
             self.layers = nn.Sequential(
                 nn.Linear(self.question_dim, 256), nn.ReLU(
@@ -127,8 +131,10 @@ class MAMLModel(nn.Module):
             return actions
 
     def compute_output(self, student_embed):
+        # biirt
         if self.question_dim==1:
             output = student_embed - self.question_difficulty
+        # binn
         else:
             output = self.output_layer(self.layers(student_embed))
             

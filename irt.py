@@ -1,10 +1,5 @@
 from scipy.sparse import csr_matrix
 import numpy as np
-import pandas as pd
-import os
-from pathlib import Path
-from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import OneHotEncoder
 from sklearn.linear_model import LogisticRegression
 from multiprocessing import Pool
 from scipy.optimize import brentq
@@ -18,6 +13,9 @@ import time
 #import wandb
 import neptune
 import os
+import warnings
+
+warnings.filterwarnings("ignore")
 #running in cluster
 DEBUG = False  # if torch.cuda.is_available() else True
 # if DEBUG:
@@ -47,7 +45,12 @@ def estimated_theta(results):
             return min_theta
         return avg_theta
 
-
+'''
+    转换为irt所对应的数据格式
+    return ： 
+        Xs = [q_ids, user_id]
+        Ys = [lables]
+'''
 def convert_to_irt(data):
     ds, rows, cols = [], [], []
     n_rows = 0
@@ -57,6 +60,7 @@ def convert_to_irt(data):
         n_item = len(d['labels'])
         row = np.arange(n_item) + n_rows
         col1 = d['q_ids']
+        # ?????
         col2 = np.zeros(n_item)+d['user_id']+n_question
         rows.append(row)
         rows.append(row)
@@ -71,7 +75,7 @@ def convert_to_irt(data):
     return Xs, Ys
 
 
-def test_model(id_, split='val'):
+def pre_test_model(id_, split='val'):
     if split == 'val':
         valid_dataset.seed = id_
     elif split == 'test':
@@ -105,15 +109,22 @@ class Model:
         input_labels = batch['input_labels'].numpy()
         nb_students, _ = input_labels.shape
         student_thetas = np.array([avg_theta] * nb_students).reshape(-1, 1)
+        # 这段代码创建了一个名为results的默认字典（default dictionary），其中每个键对应的值是一个空列表（list
         results = defaultdict(list)
+        # 预估回答结果，然后对学生能力进行变动并存储， 选择最适合学生的问题进行作答。
         if self.sampling == 'active':
+            # 获得当前已经被选择题目的mask，如果未被选择，则为1，被选择为0
             input_mask = batch['input_mask'].numpy()
             for _ in range(self.n_query):
+                # 计算学生回答对本道题目的概率
                 pr = proba(student_thetas, difficulty)
+                # 损失， 认为回答概率最接近0.5的题目最适合被选择，其中(1 - input_mask)作为已经被选择问题的惩罚
                 loss = np.abs(0.5 - pr) + (1 - input_mask)
+                # np.argmin对loss最小进行筛选，筛选维度为1维，也即每个学生都筛选出一个
                 selections = np.argmin(loss, axis=1)
+                # 这些题目被置为已经选择
                 input_mask[range(nb_students), selections] = 0
-                #
+                # 将筛选出来的题目与学生id存入结果，并将当时预测的学生能力估计进行存储
                 for user_id, item_id in enumerate(selections):
                     results[user_id].append(
                         (difficulty[item_id], input_labels[user_id, item_id]))
@@ -136,7 +147,7 @@ class Model:
                     (difficulty[item_id], input_labels[user_id, item_id]))
             for user_id in range(nb_students):
                 student_thetas[user_id] = estimated_theta(results[user_id])
-        # Test
+        # Test   输出的是一个列表，列表里都是学生在回答最后一道问题时候的正确概率
         output = proba(student_thetas, difficulty)
         return output
 
@@ -152,11 +163,12 @@ if __name__ == "__main__":
         data_path, params.fold, params.seed)
     valid_dataset, test_dataset = Dataset(valid_data), Dataset(test_data)
     n_users, n_question = len(train_data), params.n_question
+    # 从原始数据集中每一行数据代表一个学生。。。。   造假痕迹
     for idx, d in enumerate(train_data):
         d['user_id'] = idx
     Xs, Ys = convert_to_irt(train_data)
 
-    # Train
+    # Train  训练逻辑回归模型，并从模型参数中提取问题特征权重和问题难度相关的信息。这些信息可以用于进一步的分析、解释模型、或者进行其他后续操作。
     lr = LogisticRegression(solver='lbfgs', C=1./params.lr,
                             max_iter=1000, fit_intercept=False)
     lr.fit(Xs, Ys)
@@ -192,7 +204,7 @@ if __name__ == "__main__":
         val_scores, val_aucs = [], []
         test_scores, test_aucs = [], []
         for idx in N:
-            _, auc, acc = test_model(id_=idx, split='val')
+            _, auc, acc = pre_test_model(id_=idx, split='val')
             val_scores.append(acc)
             val_aucs.append(auc)
         val_score = sum(val_scores)/(len(N)+1e-20)
@@ -204,7 +216,7 @@ if __name__ == "__main__":
             best_val_auc = val_auc
             # Run on test set
             for idx in N:
-                _, auc, acc = test_model(id_=idx, split='test')
+                _, auc, acc = pre_test_model(id_=idx, split='test')
                 test_scores.append(acc)
                 test_aucs.append(auc)
             best_test_score = sum(test_scores)/(len(N)+1e-20)
